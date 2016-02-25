@@ -41,7 +41,8 @@
   function NewError(value) {
     this.avoidNew = true;
     this.value = value;
-    this.message = "JSONPath should not be called with 'new' (it prevents return of (unwrapped) scalar values)";
+    this.message = "JSONPath should not be called with 'new' (it prevents " +
+      "return of (unwrapped) scalar values)";
   }
 
   function JSONPath(opts, expr, obj, callback, otherTypeCallback) {
@@ -76,7 +77,8 @@
     this.parentProperty = opts.parentProperty || null;
     this.callback = opts.callback || callback || null;
     this.otherTypeCallback = opts.otherTypeCallback || otherTypeCallback || function () {
-      throw new Error("You must supply an otherTypeCallback callback option with the @other() operator.");
+      throw new Error("You must supply an otherTypeCallback callback option " +
+        "with the @other() operator.");
     };
 
     if (opts.autostart !== false) {
@@ -214,7 +216,7 @@
       ret = ret.concat(elems);
     }
 
-    // simple case--directly follow property
+    // Simple case; directly follow property.
     if (val && Object.prototype.hasOwnProperty.call(val, loc)) {
       addRet(this._trace(x, val[loc], cloneAndPush(path, loc), val, loc, callback));
     // all child properties
@@ -222,38 +224,38 @@
       this._walk(loc, x, val, path, parent, parentPropName, callback, (m, l, x, v, p, par, pr, cb) => {
         addRet(this._trace(cloneAndUnshift(m, x), v, p, par, pr, cb));
       });
-    // all descendent parent properties
+    // All descendent parent properties.
     } else if (loc == "..") {
-      // Check remaining expression with val's immediate children
+      // Check remaining expression with val's immediate children.
       addRet(this._trace(x, val, path, parent, parentPropName, callback));
       this._walk(loc, x, val, path, parent, parentPropName, callback, (m, l, x, v, p, par, pr, cb) => {
-        // We don't join m and x here because we only want parents, not scalar values
+        // We don't join m and x here because we only want parents, not scalar values.
         // Keep going with recursive descent on val's object children
         if (typeof v[m] == "object") {
           addRet(this._trace(cloneAndUnshift(l, x), v[m], cloneAndPush(p, m), v, m, cb));
         }
       });
-    // [(expr)] (dynamic property/index)
+    // [(expr)] (dynamic property/ index)
     } else if (loc[0] == "(") {
       if (this.currPreventEval) {
         throw new Error("Eval [(expr)] prevented in JSONPath expression.");
       }
       // As this will resolve to a property name (but we don't know it yet),
       // property and parent information is relative to the parent of the
-      // property to which this expression will resolve
+      // property to which this expression will resolve.
       addRet(this._trace(cloneAndUnshift(this._eval(loc, val, path[path.length - 1],
         path.slice(0, -1), parent, parentPropName), x), val, path, parent,
         parentPropName, callback));
     // The parent sel computation is handled in the frame above using the
-    // ancestor object of val
+    // ancestor object of val.
     } else if (loc == "^") {
-      // This is not a final endpoint, so we do not invoke the callback here
+      // This is not a final endpoint, so we do not invoke the callback here.
       return path.length ? {
         path: path.slice(0, -1),
         expr: x,
         isParentSelector: true
       } : [];
-    // property name
+    // Property name.
     } else if (loc == "~") {
       retObj = {
         path: cloneAndPush(path, loc),
@@ -263,7 +265,7 @@
       };
       this._handleCallback(retObj, callback, "property");
       return retObj;
-    // root only
+    // Root only.
     } else if (loc == "$") {
       addRet(this._trace(x, val, path, null, null, callback));
     // [?(expr)] (filtering)
@@ -281,9 +283,10 @@
     } else if (loc.indexOf(",") > -1) {
       let parts = loc.split(",");
       for (let i = 0, l = parts.length; i < l; i++) {
-        addRet(this._trace(cloneAndUnshift(parts[i], x), val, path, parent, parentPropName, callback));
+        addRet(this._trace(cloneAndUnshift(parts[i], x), val, path, parent,
+          parentPropName, callback));
       }
-    // value type: @boolean(), etc.
+    // Value type: @boolean(), etc.
     } else if (loc[0] == "@") {
       let addType = false;
       let valueType = loc.slice(1, -2);
@@ -345,14 +348,14 @@
         this._handleCallback(retObj, callback, "value");
         return retObj;
       }
-    // [start:end:step]  Python slice syntax
+    // [start:end:step]  Python slice syntax.
     } else if (/^(-?[0-9]*):(-?[0-9]*):?([0-9]*)$/.test(loc)) {
       addRet(this._slice(loc, x, val, path, parent, parentPropName, callback));
     }
 
-    // We check the resulting values for parent selections. For parent
-    // selections we discard the value object and continue the trace with the
-    // current val object
+    // We check the resulting values for parent selections. For parent selections
+    // we discard the value object and continue the trace with the current val
+    // object.
     return ret.reduce((all, ea) => {
       return all.concat(ea.isParentSelector ?
         this._trace(ea.expr, val, ea.path, parent, parentPropName, callback) : ea);
@@ -428,7 +431,7 @@
 
   // PUBLIC CLASS PROPERTIES AND METHODS
 
-  // Could store the cache object itself
+  // Could store the cache object itself.
   JSONPath.cache = {};
 
   JSONPath.toPathString = function(pathArr) {
@@ -463,28 +466,28 @@
 
     let subx = [];
     let normalized = expr
-      // Properties
+      // Properties.
       .replace(/@(?:null|boolean|number|string|integer|undefined|nonFinite|scalar|array|object|function|other)\(\)/g, ";$&;")
       // Parenthetical evaluations (filtering and otherwise), directly within
-      // brackets or single quotes
+      // brackets or single quotes.
       .replace(/[\['](\??\(.*?\))[\]']/g, ($0, $1) => "[#" + (subx.push($1) - 1) + "]")
-      // Escape periods and tildes within properties
+      // Escape periods and tildes within properties.
       .replace(/\['([^'\]]*)'\]/g, function($0, prop) {
         return "['" + prop.replace(/\./g, "%@%").replace(/~/g, "%%@@%%") + "']";
       })
-      // Properties operator
+      // Properties operator.
       .replace(/~/g, ";~;")
-      // Split by property boundaries
+      // Split by property boundaries.
       .replace(/'?\.'?(?![^\[]*\])|\['?/g, ";")
-      // Reinsert periods within properties
+      // Reinsert periods within properties.
       .replace(/%@%/g, ".")
-      // Reinsert tildes within properties
+      // Reinsert tildes within properties.
       .replace(/%%@@%%/g, "~")
-      // Parent
+      // Parent.
       .replace(/(?:;)?(\^+)(?:;)?/g, ($0, ups) => ";" + ups.split("").join(";") + ";")
-      // Descendents
+      // Descendents.
       .replace(/;;;|;;/g, ";..;")
-      // Remove trailing
+      // Remove trailing.
       .replace(/;$|'?\]|'$/g, "");
 
     let exprList = normalized.split(";").map(function (expr) {
