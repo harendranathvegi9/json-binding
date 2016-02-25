@@ -45,7 +45,7 @@
         }
       };
 
-      let mdl = new JSON.model();
+      let mdl = new JSON.Model();
 
       mdl.listen("$..book[0]", function(op, path, oldValue, value) {
         console.log("NOTIFIED!!", op, path, oldValue, value);

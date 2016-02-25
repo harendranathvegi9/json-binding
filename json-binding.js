@@ -1,4 +1,4 @@
-JSON.model = (function() {
+JSON.Model = (function() {
 
   const SYMBOL_PATH = "__path__";
 
