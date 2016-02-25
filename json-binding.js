@@ -154,7 +154,7 @@ modelImpl.prototype = {
     }
     // Walk the tree to tell all listeners that something changed.
     let pathArr = this.getPathArray(target);
-    let propPath = JSONPath.toPathString([...target[SYMBOL_PATH]].concat(prop));
+    let propPath = JSONPath.toPathString(pathArr.concat(prop));
     while (pathArr.length) {
       let path = JSONPath.toPathString(pathArr);
       if (this.listeners.has(path)) {
