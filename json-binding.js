@@ -1,6 +1,5 @@
 const model = (function() {
 
-const SYMBOL_PARENT = "__parent__";
 const SYMBOL_PATH = "__path__";
 
 function modelImpl(json) {
@@ -9,7 +8,7 @@ function modelImpl(json) {
   this.load(json || {});
 };
 
-function getObjectProxy(obj, path, parent, model) {
+function getObjectProxy(obj, path, model) {
   let isArray = Array.isArray(obj);
   let keys = isArray ? obj : Object.getOwnPropertyNames(obj);
   let count = 0;
@@ -19,13 +18,11 @@ function getObjectProxy(obj, path, parent, model) {
     key = isArray ? count : i
     if (typeof val == "object") {
       let childPath = path.concat(key);
-      obj[key] = getObjectProxy(val, childPath, path, model);
-      obj[key][SYMBOL_PARENT] = path;
+      obj[key] = getObjectProxy(val, childPath, model);
       obj[key][SYMBOL_PATH] = childPath;
     }
     ++count;
   }
-  obj[SYMBOL_PARENT] = parent;
   obj[SYMBOL_PATH] = path;
   return getGenericProxy(obj, model);
 }
@@ -33,13 +30,12 @@ function getObjectProxy(obj, path, parent, model) {
 function getGenericProxy(obj, model) {
   return new Proxy(obj, {
     set: function(target, prop, newVal) {
-      if (prop == SYMBOL_PARENT || prop == SYMBOL_PATH) {
+      if (prop == SYMBOL_PATH) {
         return true;
       }
 
       if (typeof newVal == "object") {
-        newVal = getObjectProxy(newVal, target[SYMBOL_PARENT].concat(prop),
-          target[SYMBOL_PARENT], model);
+        newVal = getObjectProxy(newVal, target[SYMBOL_PATH], model);
       }
       let oldVal = target[prop];
       target[prop] = newVal;
@@ -72,18 +68,17 @@ modelImpl.prototype = {
     // TODO: Allow extending model with sub-path parameter.
     for (let prop of Object.getOwnPropertyNames(json)) {
       if (typeof json[prop] == "object") {
-        json[prop] = getObjectProxy(json[prop], ["$", prop], ["$"], this);
+        json[prop] = getObjectProxy(json[prop], ["$", prop], this);
       }
     }
-    json[SYMBOL_PARENT] = null;
-    json[SYMBOL_PATH] = "$";
+    json[SYMBOL_PATH] = ["$"];
     this.data = getGenericProxy(json, this);
   },
   selectAll: function(path, from) {
     let result = [];
     JSONPath({
       path: path,
-      json: from ? this.select(from)[0] : this.data,
+      json: from ? this.select(from) || this.data : this.data,
       resultType: "value",
       callback: function(res) {
         result.push(res);
@@ -96,35 +91,11 @@ modelImpl.prototype = {
     return !result.length ? null : result[0];
   },
   getPathArray: function(obj) {
-    if (obj[SYMBOL_PATH]) {
-      return [...obj[SYMBOL_PATH]];
-    }
-    if (!obj[SYMBOL_PARENT]) {
+    if (!obj[SYMBOL_PATH]) {
       return null;
     }
 
-    let path = [...obj[SYMBOL_PARENT]];
-    let parent = this.select(JSONPath.toPathString(path));
-    if (!parent) {
-      return null;
-    }
-
-    if (Array.isArray(parent)) {
-      let idx = parent.indexOf(obj);
-      if (idx !== -1) {
-        path.push(idx);
-      } else {
-        console.error("Couldn't find ", obj, "in", parent);
-      }
-    } else {
-      for (let prop of Object.getOwnPropertyNames(parent)) {
-        if (parent[prop] === obj) {
-          path.push(prop);
-          break;
-        }
-      }
-    }
-    return path;
+    return [...obj[SYMBOL_PATH]];
   },
   getPath: function(obj) {
     let arr = this.getPathArray(obj);
