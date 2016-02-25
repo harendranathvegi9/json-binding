@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <title>JSON databinding</title>
+    <script src="jsonpath.js" type="text/javascript;version=1.8"></script>
+    <script src="json-binding.js" type="text/javascript;version=1.8"></script>
+  </head>
+  <body>
+    <script type="text/javascript;version=1.8">
+      let json = {
+        "store": {
+          "book": [ 
+            {
+              "category": "reference",
+              "author": "Nigel Rees",
+              "title": "Sayings of the Century",
+              "price": 8.95,
+              "meta": {
+                "stock": 3
+              }
+            }, {
+              "category": "fiction",
+              "author": "Evelyn Waugh",
+              "title": "Sword of Honour",
+              "price": 12.99
+            }, {
+              "category": "fiction",
+              "author": "Herman Melville",
+              "title": "Moby Dick",
+              "isbn": "0-553-21311-3",
+              "price": 8.99
+            }, {
+              "category": "fiction",
+              "author": "J. R. R. Tolkien",
+              "title": "The Lord of the Rings",
+              "isbn": "0-395-19395-8",
+              "price": 22.99
+            }
+          ],
+          "bicycle": {
+            "color": "red",
+            "price": 19.95
+          }
+        }
+      };
+
+      let mdl = new model();
+
+      mdl.listen("$..book[0]", function(op, path, oldValue, value) {
+        console.log("NOTIFIED!!", op, path, oldValue, value);
+      });
+
+      mdl.load(json);
+
+      console.log("Current category:", mdl.data.store.book[0].category);
+      mdl.data.store.book[0].category = "lala";
+      console.log("Updated category:", mdl.data.store.book[0].category);
+      console.log("JSONPath.toPathArray:", JSONPath.toPathArray("$..book[:2]"),
+        mdl.select(JSONPath.toPathString(JSONPath.toPathArray("$..book[:2]"))));
+
+      var path = JSONPath.toPathString(mdl.select("$..book[:2]").meta.__parent__);
+      console.log("PARENT NODE:", path, mdl.select(path));
+
+      console.log(
+        "The authors of all books in the store",
+        mdl.select("$.store.book[*].author"));
+      console.log(
+        "All authors",
+        mdl.select("$..author"));
+      console.log(
+        "All things in store, which are its books (a book array) and a red bicycle (a bicycle object).",
+        mdl.select("$.store.*"));
+      console.log(
+        "The price of everything in the store.",
+        mdl.select("$.store..price"));
+      console.log(
+        "The third book (book object)",
+        mdl.select("$..book[2]"));
+      console.log(
+        "The last book in order.",
+        mdl.select("$..book[(@.length-1)]"), mdl.select("$..book[-1:]"));
+      console.log(
+        "The first two books",
+        mdl.select("$..book[0,1]"), mdl.select("$..book[:2]"));
+      console.log(
+        "The categories and authors of all books",
+        mdl.select("$..book[0][category,author]"));
+      console.log(
+        "Filter all books with an ISBN number",
+        mdl.select("$..book[?(@.isbn)]"));
+      console.log(
+        "Filter all books cheaper than 10",
+        mdl.select("$..book[?(@.price<10)]"));
+      console.log(
+        "Obtain all property values of objects whose property is price and which does not equal 8.95",
+        mdl.select("$..*[?(@property === 'price' && @ !== 8.95)]"));
+      console.log(
+        "The root of the JSON object (i.e., the whole object itself)",
+        mdl.select("$"));
+      console.log(
+        "All Elements (and text) beneath root in an XML document. All members of a JSON structure beneath the root.",
+        mdl.select("$..*"));
+      console.log(
+        "Parent of those specific items with a price greater than 19 (i.e., the store value as the parent of the bicycle and the book array as parent of an individual book)",
+        mdl.select("$..[?(@.price>19)]^"));
+      console.log(
+        "The property names of the store sub-object ('book' and 'bicycle'). Useful with wildcard properties.",
+        mdl.select("$.store.*~"));
+      console.log(
+        "All books besides that at the path pointing to the first",
+        mdl.select("$.store.book[?(@path !== \"$['store']['book'][0]\")]"));
+    </script>
+  </body>
+</html>
