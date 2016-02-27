@@ -5,7 +5,7 @@ JSON.Model = (function() {
   function modelImpl(json) {
     this.listeners = new Map();
     this.futureListeners = new Map();
-    this.load(json || {});
+    this.load(json);
   };
 
   function getObjectProxy(obj, path, model) {
@@ -64,6 +64,11 @@ JSON.Model = (function() {
 
   modelImpl.prototype = {
     load: function(json = {}) {
+      if (typeof json != "object") {
+        this.loadFrom(json);
+        return;
+      }
+
       // TODO: Allow extending model with sub-path parameter.
       for (let prop of Object.getOwnPropertyNames(json)) {
         if (typeof json[prop] == "object") {
@@ -72,6 +77,47 @@ JSON.Model = (function() {
       }
       json[SYMBOL_PATH] = ["$"];
       this.data = getGenericProxy(json, this);
+    },
+    loadFrom: function(url, method) {
+      // TODO: Allow this method to be used in NodeJS too.
+      return new Promise((resolve, reject) => {
+        if (url instanceof URL) {
+          url = url.href;
+        }
+
+        try {
+          if (typeof url != "string") {
+            throw url;
+          }
+          if (url.indexOf("//:") > -1) {
+            new URL(url);
+          }
+        } catch (ex) {
+          reject(new Error("model#loadFrom failed: Please pass a valid URL, instead of " + url));
+          return;
+        }
+
+        if (this._xhr) {
+          reject(new Error("model#loadFrom failed: We're already attempting to load data. Please hold."));
+          return;
+        }
+
+        let req = this._xhr = new XMLHttpRequest();
+        req.open(method || "GET", url, true);
+        req.responseType = "json";
+        req.onload = () => {
+          delete this._xhr;
+
+          if (req.status < 200 || req.status >= 300) {
+            reject(new Error("model#loadFrom failed: " + req.status + " " + req.statusText));
+            return;
+          }
+
+          this.load(req.response);
+          resolve();
+        };
+        req.send(null);
+      });
     },
     selectAll: function(path, from) {
       let result = [];
@@ -143,7 +189,6 @@ JSON.Model = (function() {
       }
     },
     notify: function(op, target, prop, oldVal, newVal) {
-      // console.log("NOTIFY!!", op, target, prop, oldVal, newVal);
       if (this.futureListeners.size) {
         for (let [path, callback] of this.futureListeners.entries()) {
           this.listen(path, callback);

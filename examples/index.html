@@ -3,41 +3,39 @@
   <head>
     <meta charset="utf-8">
     <title>JSON databinding</title>
-    <script src="jsonpath.js" type="text/javascript;version=1.8"></script>
-    <script src="json-binding.js" type="text/javascript;version=1.8"></script>
+    <script src="../jsonpath.js" type="text/javascript;version=1.8"></script>
+    <script src="../model.js" type="text/javascript;version=1.8"></script>
   </head>
   <body>
     <script type="text/javascript;version=1.8">
       let json = {
         "store": {
-          "book": [ 
-            {
-              "category": "reference",
-              "author": "Nigel Rees",
-              "title": "Sayings of the Century",
-              "price": 8.95,
-              "meta": {
-                "stock": 3
-              }
-            }, {
-              "category": "fiction",
-              "author": "Evelyn Waugh",
-              "title": "Sword of Honour",
-              "price": 12.99
-            }, {
-              "category": "fiction",
-              "author": "Herman Melville",
-              "title": "Moby Dick",
-              "isbn": "0-553-21311-3",
-              "price": 8.99
-            }, {
-              "category": "fiction",
-              "author": "J. R. R. Tolkien",
-              "title": "The Lord of the Rings",
-              "isbn": "0-395-19395-8",
-              "price": 22.99
+          "book": [{
+            "category": "reference",
+            "author": "Nigel Rees",
+            "title": "Sayings of the Century",
+            "price": 8.95,
+            "meta": {
+              "stock": 3
             }
-          ],
+          }, {
+            "category": "fiction",
+            "author": "Evelyn Waugh",
+            "title": "Sword of Honour",
+            "price": 12.99
+          }, {
+            "category": "fiction",
+            "author": "Herman Melville",
+            "title": "Moby Dick",
+            "isbn": "0-553-21311-3",
+            "price": 8.99
+          }, {
+            "category": "fiction",
+            "author": "J. R. R. Tolkien",
+            "title": "The Lord of the Rings",
+            "isbn": "0-395-19395-8",
+            "price": 22.99
+          }],
           "bicycle": {
             "color": "red",
             "price": 19.95
@@ -110,6 +108,22 @@
       console.log(
         "All books besides that at the path pointing to the first",
         mdl.selectAll("$.store.book[?(@path !== \"$['store']['book'][0]\")]"));
+
+      let remoteMdl = new JSON.Model();
+      remoteMdl.loadFrom("./example.json")
+        .then(() => {
+          console.log(
+            "The authors of all books in the store",
+            remoteMdl.selectAll("$.store.book[*].author"));
+        })
+        .catch(err => {
+          console.error(err);
+        });
+
+      // This one should fail, because the one above is already loading.
+      remoteMdl.loadFrom("foo.json").catch(err => {
+        console.error(err);
+      });
     </script>
   </body>
 </html>
