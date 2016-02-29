@@ -15,7 +15,7 @@ JSON.Model = (function() {
     let val, key;
     for (let i of keys) {
       val = isArray ? i : obj[i];
-      key = isArray ? count : i
+      key = isArray ? count : i;
       if (typeof val == "object") {
         let childPath = path.concat(key);
         obj[key] = getObjectProxy(val, childPath, model);
@@ -157,6 +157,9 @@ JSON.Model = (function() {
       }
 
       let normalizedPath = this.getPath(node);
+      if (!normalizedPath) {
+        throw new Error("model#listen failed: could not find path of existing node");
+      }
       let listeners = this.listeners.get(normalizedPath);
       if (!listeners) {
         this.listeners.set(normalizedPath, listeners = new Set());
@@ -177,6 +180,9 @@ JSON.Model = (function() {
       }
 
       let normalizedPath = this.getPath(node);
+      if (!normalizedPath) {
+        throw new Error("model#stop failed: could not find path of existing node");
+      }
       let listeners = this.listeners.get(normalizedPath);
       if (!listeners) {
         return;
@@ -195,7 +201,7 @@ JSON.Model = (function() {
         }
       }
 
-      // Walk the tree to tell all listeners that something changed.
+      // Walk the tree upwards to tell all listeners that something changed.
       let pathArr = this.getPathArray(target);
       let propPath = JSONPath.toPathString(pathArr.concat(prop));
       while (pathArr.length) {
@@ -206,6 +212,35 @@ JSON.Model = (function() {
           }
         }
         pathArr.pop();
+      }
+
+      // Delete operations require child nodes listener to also be notified.
+      // Another case would be when a property changes from an object to a
+      // non-object (scalar value or 'null'), which invalidates all child nodes.
+      if (op == "delete" || (typeof oldVal == "object" && typeof newVal != "object")) {
+        const notifyChildren = obj => {
+          let isArray = Array.isArray(obj);
+          pathArr = this.getPathArray(obj);
+          let keys = isArray ? obj : Object.getOwnPropertyNames(obj);
+          let count = 0;
+          let val, key;
+          for (let i of keys) {
+            val = isArray ? i : obj[i];
+            key = isArray ? count : i;
+            if (typeof val == "object") {
+              notifyChildren(val);
+            } else {
+              propPath = JSONPath.toPathString(pathArr.concat(key));
+              if (this.listeners.has(propPath)) {
+                for (let listener of this.listeners.get(path)) {
+                  listener("delete", propPath, val, undefined);
+                }
+              }
+            }
+          }
+        };
+        
+        notifyChildren(oldVal);
       }
     }
   };
