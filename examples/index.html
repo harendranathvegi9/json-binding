@@ -5,8 +5,20 @@
     <title>JSON databinding</title>
     <script src="../jsonpath.js" type="text/javascript;version=1.8"></script>
     <script src="../model.js" type="text/javascript;version=1.8"></script>
+    <script src="../bind.js" type="text/javascript;version=1.8"></script>
   </head>
   <body>
+    <p>Current price level:&nbsp;
+      <progress data-binding="mdlSelectedBook" value="[$.price]" max="25" />
+    <p>
+    <p>Select a book:&nbsp;
+      <select data-binding="mdl"
+              data-options="[$..book[*]]"
+              data-option-value="[$.isbn]"
+              data-option-text="[$.title]"
+              onchange="selectChanged(event)" />
+    </p>
+
     <script type="text/javascript;version=1.8">
       let json = {
         "store": {
@@ -43,7 +55,7 @@
         }
       };
 
-      let mdl = new JSON.Model();
+      var mdl = new JSON.Model();
 
       mdl.listen("$..book[0]", function(op, path, oldValue, value) {
         console.log("NOTIFIED!!", op, path, oldValue, value);
@@ -109,7 +121,7 @@
         "All books besides that at the path pointing to the first",
         mdl.selectAll("$.store.book[?(@path !== \"$['store']['book'][0]\")]"));
 
-      let remoteMdl = new JSON.Model();
+      var remoteMdl = new JSON.Model();
       remoteMdl.loadFrom("./example.json")
         .then(() => {
           console.log(
@@ -124,6 +136,12 @@
       remoteMdl.loadFrom("foo.json").catch(err => {
         console.error(err);
       });
+
+      function selectChanged(event) {
+        mdlSelectedBook.load(event.node);
+      }
+
+      JSON.bind(this);
     </script>
   </body>
 </html>

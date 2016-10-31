@@ -1,16 +1,17 @@
 JSON.Model = (function() {
 
   const SYMBOL_PATH = "__path__";
+  const SYMBOL_RAW = "__raw__";
 
   function modelImpl(json) {
     this.listeners = new Map();
-    this.futureListeners = new Map();
+    this.futureListeners = [];
     this.load(json);
   };
 
   function getObjectProxy(obj, path, model) {
     let isArray = Array.isArray(obj);
-    let keys = isArray ? obj : Object.getOwnPropertyNames(obj);
+    let keys = isArray ? obj : Object.getOwnPropertyNames(obj).filter(val => val != SYMBOL_PATH);
     let count = 0;
     let val, key;
     for (let i of keys) {
@@ -28,8 +29,42 @@ JSON.Model = (function() {
 
   function getGenericProxy(obj, model) {
     return new Proxy(obj, {
-      set: function(target, prop, newVal) {
-        if (prop == SYMBOL_PATH) {
+      get(target, prop) {
+        if (prop == SYMBOL_RAW)
+          return target;
+        return target[prop];
+      },
+      getOwnPropertyDescriptor(target, prop) {
+        if (prop == SYMBOL_PATH || prop == SYMBOL_RAW)
+          return undefined;
+        return Object.getOwnPropertyDescriptor(target, prop);
+      },
+      defineProperty(target, prop, desc) {
+        // Let's not allow defineProperty, to avoid unnecessary complexity.
+        return false;
+      },
+      deleteProperty(target, prop) {
+        let oldVal = target[prop];
+        delete target[prop];
+
+        model.notify("delete", target, prop, oldVal);
+      },
+      enumerate(target) {
+        return Object.getOwnPropertyNames(target).filter(val => val != SYMBOL_PATH);
+      },
+      has(target, prop) {
+        if (prop == SYMBOL_PATH)
+          return false;
+        return prop in target;
+      },
+      ownKeys(target) {
+        return Object.getOwnPropertyNames(target).filter(val => val != SYMBOL_PATH);
+      },
+      preventExtensions(target) {
+        // noop.
+      },
+      set(target, prop, newVal) {
+        if (prop == SYMBOL_PATH || prop == SYMBOL_RAW) {
           return true;
         }
 
@@ -43,20 +78,7 @@ JSON.Model = (function() {
 
         return true;
       },
-      defineProperty: function(target, prop, desc) {
-        // Let's not allow defineProperty, to avoid unnecessary complexity.
-        return false;
-      },
-      deleteProperty: function(target, prop) {
-        let oldVal = target[prop];
-        delete target[prop];
-
-        model.notify("delete", target, prop, oldVal);
-      },
-      setPrototypeOf: function(target, proto) {
-        // noop.
-      },
-      preventExtensions: function(target) {
+      setPrototypeOf(target, proto) {
         // noop.
       }
     })
@@ -64,6 +86,7 @@ JSON.Model = (function() {
 
   modelImpl.prototype = {
     load: function(json = {}) {
+      json = json[SYMBOL_RAW] || json;
       if (typeof json != "object") {
         this.loadFrom(json);
         return;
@@ -71,12 +94,13 @@ JSON.Model = (function() {
 
       // TODO: Allow extending model with sub-path parameter.
       for (let prop of Object.getOwnPropertyNames(json)) {
-        if (typeof json[prop] == "object") {
+        if (prop != SYMBOL_PATH && typeof json[prop] == "object") {
           json[prop] = getObjectProxy(json[prop], ["$", prop], this);
         }
       }
       json[SYMBOL_PATH] = ["$"];
       this.data = getGenericProxy(json, this);
+      setTimeout(() => this.notify("load", this.data), 0);
     },
     loadFrom: function(url, method) {
       // TODO: Allow this method to be used in NodeJS too.
@@ -147,16 +171,21 @@ JSON.Model = (function() {
       }
       return JSONPath.toPathString(arr);
     },
+    hasListener(path, callback) {
+      if (!this.listeners.has(path))
+        return false;
+      return this.listeners.get(path).has(listener);
+    },
     listen: function(path, callback) {
-      this.futureListeners.delete(path);
       // First see if the path matches anything at this moment...
       let node = this.select(path);
       if (!node) {
-        this.futureListeners.set(path, callback);
+        if (!this.hasListener(path, callback))
+          this.futureListeners.push([path, callback]);
         return;
       }
 
-      let normalizedPath = this.getPath(node);
+      let normalizedPath = typeof node == "object" ? this.getPath(node) : path;
       if (!normalizedPath) {
         throw new Error("model#listen failed: could not find path of existing node");
       }
@@ -170,8 +199,10 @@ JSON.Model = (function() {
       listeners.add(callback);
     },
     stop: function(path, callback) {
-      if (this.futureListeners.has(path)) {
-        this.futureListeners.delete(path);
+      for (let i = this.futureListeners.length; i >= 0; --i) {
+        let [fPath, fCallback] = this.futureListeners[i];
+        if (fPath == path && fCallback == callback)
+          this.futureListeners.splice(i, 1);
       }
 
       let node = this.select(path);
@@ -195,20 +226,42 @@ JSON.Model = (function() {
       }
     },
     notify: function(op, target, prop, oldVal, newVal) {
-      if (this.futureListeners.size) {
-        for (let [path, callback] of this.futureListeners.entries()) {
-          this.listen(path, callback);
+      let len = this.futureListeners.length;
+      if (len) {
+        let listeners = [...this.futureListeners];
+        this.futureListeners = [];
+        for (let i = 0; i < len; ++i) {
+          this.listen(listeners[i][0], listeners[i][1]);
         }
+      }
+
+      // Loads are simple. All data has been refreshed, so we can invoke all
+      // active listeners.
+      if (op == "load") {
+        for (let [path, listeners] of this.listeners) {
+          newVal = this.select(path);
+          for (let listener of listeners) {
+            if (listener.onBindingChange)
+              listener.onBindingChange(op, path, oldVal, newVal);
+            else
+              listener(op, path, oldVal, newVal);
+          }
+        }
+        // Bail out, because there are no listeners left to find.
+        return;
       }
 
       // Walk the tree upwards to tell all listeners that something changed.
       let pathArr = this.getPathArray(target);
-      let propPath = JSONPath.toPathString(pathArr.concat(prop));
+      let propPath = JSONPath.toPathString(pathArr.concat(prop || []));
       while (pathArr.length) {
         let path = JSONPath.toPathString(pathArr);
         if (this.listeners.has(path)) {
           for (let listener of this.listeners.get(path)) {
-            listener(op, propPath, oldVal, newVal);
+            if (listener.onBindingChange)
+              listener.onBindingChange(op, propPath, oldVal, newVal);
+            else
+              listener(op, propPath, oldVal, newVal);
           }
         }
         pathArr.pop();
@@ -233,7 +286,7 @@ JSON.Model = (function() {
               propPath = JSONPath.toPathString(pathArr.concat(key));
               if (this.listeners.has(propPath)) {
                 for (let listener of this.listeners.get(path)) {
-                  listener("delete", propPath, val, undefined);
+                  (listener.onBindingChange || listener)("delete", propPath, val, undefined);
                 }
               }
             }
