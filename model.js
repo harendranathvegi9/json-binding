@@ -2,10 +2,13 @@ JSON.Model = (function() {
 
   const SYMBOL_PATH = "__path__";
   const SYMBOL_RAW = "__raw__";
+  const RE_LASTPROP = /(\[(\d+)|['"`]{1}([^'"`]*)['"`]{1}\]$|\.([\w]+)$)/;
+  const RE_ARRAYINDEX = /\[\d+\]$/;
 
   function modelImpl(json) {
     this.listeners = new Map();
     this.futureListeners = [];
+    this.changeOrigin = null;
     this.load(json);
   };
 
@@ -30,13 +33,15 @@ JSON.Model = (function() {
   function getGenericProxy(obj, model) {
     return new Proxy(obj, {
       get(target, prop) {
-        if (prop == SYMBOL_RAW)
+        if (prop == SYMBOL_RAW) {
           return target;
+        }
         return target[prop];
       },
       getOwnPropertyDescriptor(target, prop) {
-        if (prop == SYMBOL_PATH || prop == SYMBOL_RAW)
+        if (prop == SYMBOL_PATH || prop == SYMBOL_RAW) {
           return undefined;
+        }
         return Object.getOwnPropertyDescriptor(target, prop);
       },
       defineProperty(target, prop, desc) {
@@ -85,12 +90,14 @@ JSON.Model = (function() {
   }
 
   modelImpl.prototype = {
-    load: function(json = {}) {
+    load(json = {}) {
       json = json[SYMBOL_RAW] || json;
       if (typeof json != "object") {
         this.loadFrom(json);
         return;
       }
+      // Let's get a fresh object to work with.
+      json = Object.assign({}, json);
 
       // TODO: Allow extending model with sub-path parameter.
       for (let prop of Object.getOwnPropertyNames(json)) {
@@ -102,7 +109,7 @@ JSON.Model = (function() {
       this.data = getGenericProxy(json, this);
       setTimeout(() => this.notify("load", this.data), 0);
     },
-    loadFrom: function(url, method) {
+    loadFrom(url, method) {
       // TODO: Allow this method to be used in NodeJS too.
       return new Promise((resolve, reject) => {
         if (url instanceof URL) {
@@ -143,70 +150,106 @@ JSON.Model = (function() {
         req.send(null);
       });
     },
-    selectAll: function(path, from) {
+    selectAll(path, from) {
       let result = [];
-      JSONPath({
-        path: path,
-        json: from ? this.select(from) || this.data : this.data,
-        resultType: "value",
-        callback: res => result.push(res)
-      });
+      try {
+        JSONPath({
+          path: path,
+          json: from ? this.select(from) || this.data : this.data,
+          resultType: "value",
+          callback: res => result.push(res)
+        });
+      } catch (ex) {
+        throw new SyntaxError(`There was in error in your JSONPath syntax: '${ex.message}' for path '${path}'`);
+      }
       return result;
     },
-    select: function(path, from) {
+    select(path, from) {
       let result = this.selectAll(path, from);
-      return !result.length ? null : result[0];
+      return !result.length ? undefined : result[0];
     },
-    getPathArray: function(obj) {
+    change(path, value, origin) {
+      if (this.select(path) === undefined) {
+        console.error(`Invalid path, '${path}' did not match any nodes.`);
+        return;
+      }
+
+      let propName, parentPath;
+      path.replace(RE_LASTPROP, (m, fullProp, arrayIndex, propName1, propName2) => {
+        parentPath = path.replace(fullProp, "");
+        propName = arrayIndex || propName1 || propName2;
+      });
+
+      let parentNode = this.select(parentPath);
+      if (!parentNode) {
+        console.error(`Can not change the value of '${propName}' on node with path '${parentPath}'`);
+        return;
+      }
+      this.changeOrigin = origin;
+      parentNode[propName] = value;
+      this.changeOrigin = null;
+    },
+    getPathArray(obj, originalPath) {
+      if (typeof obj != "object" && originalPath) {
+        // Try to rip off the last chunk of the path that points to the property,
+        // which may look like '.propName', ['propName'] or '[42]'.
+        let search = originalPath.replace(RE_LASTPROP, "");
+        // If the regex didn't change anything to the path, well, we'll call
+        // it a day.
+        if (search == originalPath) {
+          return null;
+        }
+        return this.getPathArray(this.select(search), search);
+      }
+
       if (!obj[SYMBOL_PATH]) {
         return null;
       }
-
       return [...obj[SYMBOL_PATH]];
     },
-    getPath: function(obj) {
-      let arr = this.getPathArray(obj);
+    getPath(obj, originalPath) {
+      let arr = this.getPathArray(obj, originalPath);
       if (!arr) {
         return null;
       }
       return JSONPath.toPathString(arr);
     },
-    hasListener(path, callback) {
-      if (!this.listeners.has(path))
-        return false;
-      return this.listeners.get(path).has(listener);
-    },
-    listen: function(path, callback) {
+    listen(path, callback) {
       // First see if the path matches anything at this moment...
       let node = this.select(path);
-      if (!node) {
-        if (!this.hasListener(path, callback))
-          this.futureListeners.push([path, callback]);
+      if (node === undefined) {
+        this.futureListeners.push([path, callback]);
         return;
       }
 
-      let normalizedPath = typeof node == "object" ? this.getPath(node) : path;
+      let normalizedPath = this.getPath(node, path);
+      // If the path is there and the original path doesn't end with an array
+      // index getter specifically, strip it.
+      if (normalizedPath && !RE_ARRAYINDEX.test(path)) {
+        normalizedPath = normalizedPath.replace(RE_ARRAYINDEX, "");
+      }
       if (!normalizedPath) {
-        throw new Error("model#listen failed: could not find path of existing node");
+        throw new Error(`model#listen failed: could not find path of existing node with path '${path}'`);
       }
       let listeners = this.listeners.get(normalizedPath);
       if (!listeners) {
-        this.listeners.set(normalizedPath, listeners = new Set());
+        this.listeners.set(normalizedPath, listeners = new Map());
       }
       if (listeners.has(callback)) {
         return;
       }
-      listeners.add(callback);
+      listeners.set(callback, path);
     },
-    stop: function(path, callback) {
+    stop(path, callback) {
       for (let i = this.futureListeners.length; i >= 0; --i) {
         let [fPath, fCallback] = this.futureListeners[i];
-        if (fPath == path && fCallback == callback)
+        if (fPath == path && fCallback == callback) {
           this.futureListeners.splice(i, 1);
+        }
       }
 
       let node = this.select(path);
-      if (!node) {
+      if (node === undefined) {
         return;
       }
 
@@ -225,7 +268,7 @@ JSON.Model = (function() {
         }
       }
     },
-    notify: function(op, target, prop, oldVal, newVal) {
+    notify(op, target, prop, oldVal, newVal) {
       let len = this.futureListeners.length;
       if (len) {
         let listeners = [...this.futureListeners];
@@ -240,12 +283,7 @@ JSON.Model = (function() {
       if (op == "load") {
         for (let [path, listeners] of this.listeners) {
           newVal = this.select(path);
-          for (let listener of listeners) {
-            if (listener.onBindingChange)
-              listener.onBindingChange(op, path, oldVal, newVal);
-            else
-              listener(op, path, oldVal, newVal);
-          }
+          this._notify(listeners, op, path, oldVal, newVal);
         }
         // Bail out, because there are no listeners left to find.
         return;
@@ -253,17 +291,13 @@ JSON.Model = (function() {
 
       // Walk the tree upwards to tell all listeners that something changed.
       let pathArr = this.getPathArray(target);
-      let propPath = JSONPath.toPathString(pathArr.concat(prop || []));
+      if (prop) {
+        pathArr.push(prop);
+      }
+      let propPath = JSONPath.toPathString(pathArr);
       while (pathArr.length) {
         let path = JSONPath.toPathString(pathArr);
-        if (this.listeners.has(path)) {
-          for (let listener of this.listeners.get(path)) {
-            if (listener.onBindingChange)
-              listener.onBindingChange(op, propPath, oldVal, newVal);
-            else
-              listener(op, propPath, oldVal, newVal);
-          }
-        }
+        this._notify(this.listeners.get(path), op, propPath, oldVal, newVal);
         pathArr.pop();
       }
 
@@ -284,16 +318,29 @@ JSON.Model = (function() {
               notifyChildren(val);
             } else {
               propPath = JSONPath.toPathString(pathArr.concat(key));
-              if (this.listeners.has(propPath)) {
-                for (let listener of this.listeners.get(path)) {
-                  (listener.onBindingChange || listener)("delete", propPath, val, undefined);
-                }
-              }
+              if (this.listeners.has(propPath))
+                this._notify(this.listeners.get(path), "delete", propPath, val, undefined);
             }
           }
         };
         
         notifyChildren(oldVal);
+      }
+    },
+    _notify(listeners, ...args) {
+      if (!listeners) {
+        return;
+      }
+
+      for (let [listener, originalPath] of listeners) {
+        if (this.changeOrigin === listener) {
+          continue;
+        }
+        if (listener.handleBindingChange) {
+          listener.handleBindingChange(originalPath, ...args);
+        } else {
+          listener(originalPath, ...args);
+        }
       }
     }
   };

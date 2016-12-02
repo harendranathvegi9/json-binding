@@ -9,14 +9,20 @@
   </head>
   <body>
     <p>Current price level:&nbsp;
-      <progress data-binding="mdlSelectedBook" value="[$.price]" max="25" />
-    <p>
+      <progress data-binding="mdlSelectedBook" value="[$.price]" max="25">
+    </p>
+    <p>Current price level, different binding:&nbsp;
+      <progress data-binding="mdl" value="[$..book[?(@.selected)].price]" max="25">
+    </p>
     <p>Select a book:&nbsp;
       <select data-binding="mdl"
               data-options="[$..book[*]]"
               data-option-value="[$.isbn]"
               data-option-text="[$.title]"
-              onchange="selectChanged(event)" />
+              onchange="selectChanged(event)"></select>
+    </p>
+    <p>Set the price yourself:&nbsp;
+      <input type="range" data-binding="mdl" min="1" max="100" value="[$..book[?(@.selected)].price]">
     </p>
 
     <script type="text/javascript;version=1.8">
@@ -57,8 +63,8 @@
 
       var mdl = new JSON.Model();
 
-      mdl.listen("$..book[0]", function(op, path, oldValue, value) {
-        console.log("NOTIFIED!!", op, path, oldValue, value);
+      mdl.listen("$..book[0]", function(path, op, normalizedPath, oldValue, value) {
+        console.log("NOTIFIED!!", op, path, normalizedPath, oldValue, value);
       });
 
       mdl.load(json);
@@ -139,6 +145,9 @@
 
       function selectChanged(event) {
         mdlSelectedBook.load(event.node);
+        if (event.previous)
+          delete event.previous.selected;
+        event.node.selected = true;
       }
 
       JSON.bind(this);
